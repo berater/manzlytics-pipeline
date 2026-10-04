@@ -1,0 +1,13 @@
+[project]
+name = "manzlytics-ingest"
+version = "0.0.0"
+description = "ADS-B verisini (adsb.lol globe_history vb.) indirip normalize eder."
+requires-python = ">=3.11"
+dependencies = ["h3>=4.1", "manzlytics-common", "pyarrow>=17"]
+
+[project.scripts]
+mz-ingest = "manzlytics_ingest.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

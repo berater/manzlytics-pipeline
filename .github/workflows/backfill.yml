@@ -1,0 +1,91 @@
+name: Geçmiş doldurma
+
+# adsb.lol günlük arşivlerini (ODbL) işler ve sonuçları hedef deponun GitHub Releases'ına
+# (`archive-YYYY-MM`) yükler. Hedefte manifest'i olan gün tamdır ve atlanır, yani iş idempotenttir:
+# düşen bir koşu aynı girdilerle yeniden başlatılırsa kaldığı yerden sürer.
+#
+# Gerekenler (Settings → Secrets and variables → Actions):
+#   - secret ARCHIVE_TOKEN: hedef depoda "Contents: Read and write" yetkili fine-grained token
+#   - variable TARGET_REPO (isteğe bağlı): sahip/depo; varsayılan <bu deponun sahibi>/manzlytics
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "İlk gün (YYYY-MM-DD); en eski 2023-02-16"
+        default: "2023-02-16"
+      to:
+        description: "Son gün (YYYY-MM-DD); boş = dün"
+        required: false
+      days:
+        description: "Yalnız bu günler (boşlukla ayrılmış; doluysa from/to yok sayılır). Deneme için"
+        required: false
+      chunk:
+        description: "Bir işin sırayla işleyeceği gün sayısı"
+        default: "6"
+      parallel:
+        description: "Aynı anda çalışan iş sayısı (kaynağa saygı: 10'u aşmayın)"
+        default: "8"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backfill
+  cancel-in-progress: false
+
+env:
+  TARGET_REPO: ${{ vars.TARGET_REPO || format('{0}/manzlytics', github.repository_owner) }}
+  GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      parallel: ${{ steps.plan.outputs.parallel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-packages --locked
+      - id: plan
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          DAYS: ${{ inputs.days }}
+          CHUNK: ${{ inputs.chunk }}
+          PARALLEL: ${{ inputs.parallel }}
+        run: uv run python scripts/plan_matrix.py
+      - name: Ay release'lerini önceden oluştur
+        if: steps.plan.outputs.months != ''
+        env:
+          MONTHS: ${{ steps.plan.outputs.months }}
+        # Paralel işler aynı ayın release'ini aynı anda oluşturmaya çalışıp çakışmasın.
+        run: |
+          uv run python - <<'PY'
+          import os
+          from manzlytics_ingest.release import ensure_release
+          for m in os.environ["MONTHS"].split():
+              ensure_release(f"archive-{m}", "adsblol", os.environ["TARGET_REPO"])
+              print("hazır:", m)
+          PY
+
+  process:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.parallel) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-packages --locked
+      - name: Günleri işle ve yükle
+        env:
+          DAYS: ${{ matrix.days }}
+        run: bash scripts/process_days.sh

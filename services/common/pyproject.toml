@@ -1,0 +1,13 @@
+[project]
+name = "manzlytics-common"
+version = "0.0.0"
+description = "Servisler arası ortak kod: ClickHouse istemcisi ve şema göçleri."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+mz-db = "manzlytics_common.migrate:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

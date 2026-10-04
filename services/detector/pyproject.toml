@@ -1,0 +1,13 @@
+[project]
+name = "manzlytics-detector"
+version = "0.0.0"
+description = "Jamming/spoofing tespit ve H3 agregasyon işleri."
+requires-python = ">=3.11"
+dependencies = ["h3>=4.1", "manzlytics-common", "manzlytics-ingest", "pyarrow>=17"]
+
+[project.scripts]
+mz-detect = "manzlytics_detector.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
