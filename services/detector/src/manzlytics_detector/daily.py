@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+import zlib
 from datetime import date
 from functools import partial
 from pathlib import Path
@@ -49,10 +50,11 @@ def faulty_from_file(path: Path) -> frozenset[str]:
     return frozenset(a["icao24"] for a in json.loads(path.read_text())["faulty"])
 
 
-# Kaynak arşivde ara sıra yarım kalmış (kesik gzip / bozuk JSON) tek uçak izi çıkar; bunlar günü
-# düşürmesin, sayılıp atlansın. Oran bu sınırı aşarsa indirme/arşiv bozuktur: gün hata verir.
+# Kaynak arşivde ara sıra yarım kalmış ya da bozuk (kesik gzip, bozuk deflate verisi → `zlib.error`,
+# bozuk JSON) tek uçak izi çıkar; bunlar günü düşürmesin, sayılıp atlansın. Oran bu sınırı aşarsa
+# indirme/arşiv bozuktur: gün hata verir.
 MAX_CORRUPT_SHARE = 0.01
-CORRUPT_TRACE_ERRORS = (EOFError, OSError, ValueError, KeyError, TypeError)
+CORRUPT_TRACE_ERRORS = (EOFError, OSError, zlib.error, ValueError, KeyError, TypeError)
 
 
 def trace_outputs(raw: bytes, focus: BBox | None) -> tuple[dict[str, list], dict[str, list], bool]:
