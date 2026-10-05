@@ -32,8 +32,9 @@ PREFERRED_RELEASES = (
 )
 YEAR_REPO = "https://github.com/adsblol/globe_history_{year}"
 # `PREFERRED_RELEASES.txt` yalnız son ≈ 10 ayı listeler; daha eski günler yıllık depoda aynı gün
-# için birden çok kopya olarak durur. Tercih sırası: prod, staging, test (mlatonly yalnız MLAT).
-COPY_PREFERENCE = ("prod-0", "staging-0", "test-0", "test-1")
+# için birden çok kopya olarak durur. Tercih sırası: prod, staging, test (mlatonly yalnız MLAT);
+# `…tmp` son ek geçici yükleme adıdır (2025-05-28 … 2025-06-10 yalnız böyle var), en son denenir.
+COPY_PREFERENCE = ("prod-0", "staging-0", "test-0", "test-1", "prod-0tmp", "staging-0tmp")
 MAX_PARTS = 26 * 26  # .tar.aa … .tar.zz
 FIRST_DAY = date(2023, 2, 16)
 MAX_DETAIL_AGE_S = 60.0
@@ -107,9 +108,11 @@ def _part_suffixes() -> Iterator[str]:
         yield letters[i // 26] + letters[i % 26]
 
 
-def release_parts(day: date, tag: str, exists: Callable[[str], bool] = url_exists) -> list[str]:
+def release_parts(
+    day: date, tag: str, exists: Callable[[str], bool] = url_exists, year: int | None = None
+) -> list[str]:
     """Etiketin tar adresleri: tek parça `.tar` ya da `.tar.aa`, `.tar.ab`, …"""
-    base = f"{YEAR_REPO.format(year=day.year)}/releases/download/{tag}/{tag}.tar"
+    base = f"{YEAR_REPO.format(year=year or day.year)}/releases/download/{tag}/{tag}.tar"
     if exists(base):
         return [base]
     urls = []
@@ -133,15 +136,19 @@ def resolve_release(
         return preferred_release(day, listing)
     except ArchiveNotPublished:
         pass
-    try:
-        tags = tags_for_year(day.year)
-    except (subprocess.SubprocessError, OSError) as e:
-        # Örneğin yılın deposu henüz açılmamış (1 Ocak): o gün kaynakta yok demektir.
-        raise ArchiveNotPublished(f"{day.isoformat()}: {day.year} deposu okunamadı ({e})") from e
-    tag = pick_tag(day, tags)
-    if tag is None:
-        raise ArchiveNotPublished(f"{day.isoformat()} için arşiv bulunamadı")
-    return release_parts(day, tag, exists)
+    # Yıl sonu/başı günleri komşu yılın deposunda durabilir (31 Aralık → sonraki yıl).
+    errors = []
+    for year in (day.year, day.year + 1, day.year - 1):
+        try:
+            tags = tags_for_year(year)
+        except (subprocess.SubprocessError, OSError) as e:
+            # Örneğin yılın deposu henüz açılmamış (1 Ocak): o depoda gün yok demektir.
+            errors.append(f"{year} deposu okunamadı ({e})")
+            continue
+        if tag := pick_tag(day, tags):
+            return release_parts(day, tag, exists, year)
+    detail = f" ({'; '.join(errors)})" if errors else ""
+    raise ArchiveNotPublished(f"{day.isoformat()} için arşiv bulunamadı{detail}")
 
 
 def _open(url: str, timeout: float = 60):
