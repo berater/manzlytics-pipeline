@@ -1,0 +1,87 @@
+name: Günlük işleme
+
+# Son günleri (varsayılan: dün ve önceki 2 gün) işler ve hedef deponun (`manzlytics`) GitHub Releases
+# arşivine (`archive-YYYY-MM`) yükler. Hedefte manifest'i olan gün tamdır ve atlanır (idempotent);
+# kaynak (adsb.lol) günü henüz yayınlamadıysa (çıkış kodu 3) hata sayılmaz, sonraki zamanlanmış
+# koşu yeniden dener. Bu depo herkese açık olduğu için Actions dakikası ücretsizdir; ana depodaki
+# (private) gece işi yalnız arşivdeki yeni günleri statik veriye dönüştürür (EXPORT_ONLY=true).
+#
+# Geçmişi doldurmak için bu iş akışı değil `backfill.yml` kullanılır.
+#
+# Gerekenler (backfill.yml ile aynı): secret ARCHIVE_TOKEN (hedef depoda "Contents: Read and write"),
+# variable TARGET_REPO (isteğe bağlı; varsayılan <bu deponun sahibi>/manzlytics).
+on:
+  schedule:
+    # adsb.lol günü gece yarısından sonra yayınlar; 4 deneme/gün, yayın gecikse de ilk fırsatta alınır.
+    # Ana depodaki dışa aktarma (11:17 ve 23:17 UTC) bu koşulardan sonra gelir.
+    - cron: "47 4,10,16,22 * * *"
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: "Kaç gün geriye bakılsın (dün dahil). Bir hafta kesinti sonrası: 7"
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+env:
+  TARGET_REPO: ${{ vars.TARGET_REPO || format('{0}/manzlytics', github.repository_owner) }}
+  GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      parallel: ${{ steps.plan.outputs.parallel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-packages --locked
+      - id: plan
+        env:
+          DAYS_BACK: ${{ inputs.days_back || '3' }}
+          CHUNK: "1" # her gün ayrı iş (≈ 45 dk); 3 günü sıralı işlemek süre sınırını aşar
+          PARALLEL: "3"
+        run: |
+          set -euo pipefail
+          # plan_matrix.py: TO boşsa dün; FROM'dan düne kadar hedef arşivde olmayan günleri seçer.
+          export FROM=$(date -u -d "$DAYS_BACK days ago" +%F)
+          uv run python scripts/plan_matrix.py
+      - name: Ay release'lerini önceden oluştur
+        if: steps.plan.outputs.months != ''
+        env:
+          MONTHS: ${{ steps.plan.outputs.months }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          from manzlytics_ingest.release import ensure_release
+          for m in os.environ["MONTHS"].split():
+              ensure_release(f"archive-{m}", "adsblol", os.environ["TARGET_REPO"])
+              print("hazır:", m)
+          PY
+
+  process:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.parallel) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-packages --locked
+      - name: Günleri işle ve yükle
+        env:
+          DAYS: ${{ matrix.days }}
+        run: bash scripts/process_days.sh
