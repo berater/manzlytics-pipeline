@@ -25,7 +25,16 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from manzlytics_ingest.release import Runner, _check, _gh, _run, release_tag
+from manzlytics_ingest.release import (
+    RELEASE_NOT_FOUND,
+    Runner,
+    _check,
+    _gh,
+    _run,
+    gh_error_text,
+    release_assets,
+    release_tag,
+)
 
 STATE_TAG = "pipeline-state"
 FAILURES_FILE = "failures.json"
@@ -111,15 +120,19 @@ def exported_days(static_dir: Path) -> set[date]:
 
 
 def archived_days(start: date, end: date, repo: str | None = None, run: Runner = _run) -> set[date]:
-    """Release'lerde manifest'i olan günler (manifest en son yüklenir: var = gün tam)."""
+    """Release'lerde manifest'i olan günler (manifest en son yüklenir: var = gün tam).
+
+    Yalnızca release'i hiç olmayan ay boş sayılır. Başka her `gh` hatası (auth, rate-limit, ağ…)
+    `RuntimeError` olarak yükselir; böylece "veri yok" ile "bilinmiyor" karışmaz ve kısmi sonuç
+    dönmez.
+    """
     days: set[date] = set()
     months = sorted({(d.year, d.month) for d in _span(start, end)})
     for year, month in months:
-        tag = release_tag(date(year, month, 1))
-        p = run([*_gh(repo), "release", "view", tag, "--json", "assets"])
-        if p.returncode != 0:  # o ayın release'i henüz yok
+        assets = release_assets(release_tag(date(year, month, 1)), repo, run)
+        if assets is None:  # o ayın release'i henüz yok
             continue
-        for asset in json.loads(p.stdout).get("assets", []):
+        for asset in assets:
             name = asset["name"]
             if name.startswith("adsblol-") and name.endswith("-manifest.json"):
                 try:
@@ -133,14 +146,35 @@ def _span(start: date, end: date) -> list[date]:
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
 
+# `gh release download --pattern` hiçbir varlıkla eşleşmezse verdiği mesaj (release var, dosya yok).
+_NO_ASSET = "no assets match"
+
+
 def load_failures(repo: str | None = None, run: Runner = _run) -> dict[str, dict]:
+    """Karantina sayaçları. Release ya da dosya henüz yoksa `{}` (hiç hata kaydı yok).
+
+    Başka her hata `RuntimeError`: indirme hatasını "kayıt yok" sayıp sayaçları sıfırlamayız.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         cmd = [*_gh(repo), "release", "download", STATE_TAG, "--pattern", FAILURES_FILE]
         p = run([*cmd, "--dir", tmp])
         path = Path(tmp) / FAILURES_FILE
-        if p.returncode != 0 or not path.is_file():
-            return {}  # release ya da dosya henüz yok: hiç hata kaydı yok
-        return json.loads(path.read_text())
+        if p.returncode != 0:
+            err = gh_error_text(p)
+            if RELEASE_NOT_FOUND in err.lower() or _NO_ASSET in err.lower():
+                return {}
+            raise RuntimeError(f"{STATE_TAG} {FAILURES_FILE} indirme başarısız: {err}")
+        if not path.is_file():
+            return {}
+        try:
+            failures = json.loads(path.read_text())
+        except ValueError as e:
+            raise RuntimeError(
+                f"{STATE_TAG} {FAILURES_FILE} bozuk (geçerli JSON değil): {e}"
+            ) from e
+        if not isinstance(failures, dict):
+            raise RuntimeError(f"{STATE_TAG} {FAILURES_FILE} bozuk: nesne bekleniyordu")
+        return failures
 
 
 def save_failures(failures: dict[str, dict], repo: str | None = None, run: Runner = _run) -> None:

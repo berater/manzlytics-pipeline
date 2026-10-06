@@ -18,7 +18,10 @@ for day in $DAYS; do
   uv run mz-detect daily --date "$day" --out data/archive --cache data/cache
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    if uv run mz-ingest archive-publish --date "$day" --archive data/archive --repo "$TARGET_REPO"; then
+    # Yayın kapısı: boş saatlik özet (0 satır) arşive yüklenmez; archive-publish bundan sonra.
+    if ! uv run mz-detect check-contract --date "$day" --archive data/archive; then
+      failed+=("$day (sözleşme)")
+    elif uv run mz-ingest archive-publish --date "$day" --archive data/archive --repo "$TARGET_REPO"; then
       done_days+=("$day")
     else
       failed+=("$day (yükleme)")

@@ -26,6 +26,8 @@ from manzlytics_detector.store import aggregate
 EXIT_NOT_PUBLISHED = 3
 # `mz-detect mark --failed`: gün deneme sınırına ulaştı, karantinada (archive.yml kırmızı olur).
 EXIT_QUARANTINED = 10
+# `mz-detect check-contract`: gün yayınlanamaz (saatlik özet boş/okunamıyor); publish çalışmaz.
+EXIT_CONTRACT_ERROR = 12
 
 
 def _files(inputs: list[Path]) -> list[Path]:
@@ -96,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--date", type=date.fromisoformat, required=True)
         p.add_argument("--archive", type=Path, default=Path("data/archive"))
 
+    day_args(
+        sub.add_parser(
+            "check-contract",
+            help="Yayın öncesi kapı: saatlik özet boşsa (0 satır) çıkış 12; yalnız bu kontrol",
+        )
+    )
     avi = sub.add_parser(
         "avionics", help="arşivlenmiş bir günde arızalı aviyonik filtresinin etkisi (eşik kontrolü)"
     )
@@ -163,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_plan(args)
     if args.command == "mark":
         return run_mark(args)
+    if args.command == "check-contract":
+        return run_check_contract(args)
     if args.command == "aggregate":
         return run_aggregate(args)
     if args.command == "daily":
@@ -208,6 +218,21 @@ def run_plan(args: argparse.Namespace) -> int:
     )
     if items:
         print(plan.format_plan(items))
+    return 0
+
+
+def run_check_contract(args: argparse.Namespace) -> int:
+    """Saatlik özet boş ya da okunamıyorsa `::error::` + 12 (gün yayınlanmaz); aksi halde 0."""
+    from manzlytics_detector.contract import ensure_nonempty
+    from manzlytics_detector.daily import HOURLY_FILE
+
+    day = args.date.isoformat()
+    try:
+        ensure_nonempty(day_dir(args.archive, "adsblol", args.date) / HOURLY_FILE)
+    except Exception as e:  # noqa: BLE001 - her kapı hatası görünür ve sıfırdan farklı çıkmalı
+        print(f"::error::{day}: sözleşme kontrolü başarısız: {type(e).__name__}: {e}")
+        return EXIT_CONTRACT_ERROR
+    print(f"{day}: saatlik özet dolu")
     return 0
 
 
