@@ -35,7 +35,6 @@ concurrency:
 
 env:
   TARGET_REPO: ${{ vars.TARGET_REPO || format('{0}/manzlytics', github.repository_owner) }}
-  GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
 
 jobs:
   plan:
@@ -50,6 +49,7 @@ jobs:
       - run: uv sync --all-packages --locked
       - id: plan
         env:
+          GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
           FROM: ${{ inputs.from }}
           TO: ${{ inputs.to }}
           DAYS: ${{ inputs.days }}
@@ -59,6 +59,7 @@ jobs:
       - name: Ay release'lerini önceden oluştur
         if: steps.plan.outputs.months != ''
         env:
+          GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
           MONTHS: ${{ steps.plan.outputs.months }}
         # Paralel işler aynı ayın release'ini aynı anda oluşturmaya çalışıp çakışmasın.
         run: |
@@ -87,5 +88,6 @@ jobs:
       - run: uv sync --all-packages --locked
       - name: Günleri işle ve yükle
         env:
+          GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
           DAYS: ${{ matrix.days }}
         run: bash scripts/process_days.sh
