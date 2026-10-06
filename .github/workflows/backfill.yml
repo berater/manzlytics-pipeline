@@ -88,6 +88,8 @@ jobs:
       - run: uv sync --all-packages --locked
       - name: Günleri işle ve yükle
         env:
-          GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
+          # GH_TOKEN değil: token yalnız process_days.sh içinde archive-publish komutuna verilir;
+          # adsb.lol indirmesi ve işleme (mz-detect daily) token'sız çalışır.
+          ARCHIVE_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
           DAYS: ${{ matrix.days }}
         run: bash scripts/process_days.sh

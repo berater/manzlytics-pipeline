@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # backfill.yml'in bir işi: DAYS'teki günleri sırayla işler ve hedef deponun arşivine yükler.
-# Girdi (ortam): DAYS (boşlukla ayrılmış günler), TARGET_REPO, GH_TOKEN.
+# Girdi (ortam): DAYS (boşlukla ayrılmış günler), TARGET_REPO, ARCHIVE_TOKEN.
+# ARCHIVE_TOKEN yalnız `archive-publish` komutuna GH_TOKEN olarak verilir (gh release view/create/upload);
+# indirme/işleme/sözleşme kontrolü token'sız çalışır.
 # Bir günün hatası diğerlerini durdurmaz; sonunda hata varsa iş kırmızı biter (yeniden
 # başlatılınca tamamlanan günler atlanır).
 set -uo pipefail
 
-: "${DAYS:?}" "${TARGET_REPO:?}"
+: "${DAYS:?}" "${TARGET_REPO:?}" "${ARCHIVE_TOKEN:?}"
+unset GH_TOKEN GITHUB_TOKEN # alt süreçlere sızmasın
 BUDGET_S=$((300 * 60)) # iş sınırı 340 dk; bundan sonra yeni gün başlatma
 
 done_days=() missing=() failed=() left=()
@@ -21,7 +24,7 @@ for day in $DAYS; do
     # Yayın kapısı: boş saatlik özet (0 satır) arşive yüklenmez; archive-publish bundan sonra.
     if ! uv run mz-detect check-contract --date "$day" --archive data/archive; then
       failed+=("$day (sözleşme)")
-    elif uv run mz-ingest archive-publish --date "$day" --archive data/archive --repo "$TARGET_REPO"; then
+    elif GH_TOKEN="$ARCHIVE_TOKEN" uv run mz-ingest archive-publish --date "$day" --archive data/archive --repo "$TARGET_REPO"; then
       done_days+=("$day")
     else
       failed+=("$day (yükleme)")

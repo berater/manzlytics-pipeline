@@ -93,7 +93,7 @@ def run_script(tmp_path, gate_rc, daily_rc=0):
     )
     uv.chmod(uv.stat().st_mode | stat.S_IEXEC)
     env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "CALLS": str(log)}
-    env |= {"DAYS": "2026-09-25", "TARGET_REPO": "o/r", "GITHUB_STEP_SUMMARY": str(tmp_path / "s")}
+    env |= {"DAYS": "2026-09-25", "TARGET_REPO": "o/r", "ARCHIVE_TOKEN": "dummy", "GITHUB_STEP_SUMMARY": str(tmp_path / "s")}
     p = subprocess.run(
         ["bash", str(ROOT / "scripts/process_days.sh")], cwd=tmp_path, env=env, capture_output=True
     )
