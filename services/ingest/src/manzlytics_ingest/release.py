@@ -56,6 +56,34 @@ def _gh(repo: str | None) -> list[str]:
     return ["gh"] if repo is None else ["gh", "-R", repo]
 
 
+# gh'nin "release yok" mesajı. Yalın "HTTP 404" bunun yerine geçmez: yetkisiz token ya da yanlış
+# depo da 404 görür ve "veri yok" diye yutulmamalı.
+RELEASE_NOT_FOUND = "release not found"
+
+
+def gh_error_text(p: subprocess.CompletedProcess) -> str:
+    """`gh` hatasının okunur metni; stderr boşsa çıkış kodu."""
+    return p.stderr.strip() or p.stdout.strip() or f"gh çıkış kodu {p.returncode}"
+
+
+def release_assets(tag: str, repo: str | None = None, run: Runner = _run) -> list[dict] | None:
+    """Release'in varlık listesi; release hiç yoksa `None`.
+
+    Yalnızca gh'nin açık "release not found" cevabı `None` döner. Auth, rate-limit, ağ, API ve
+    diğer her hata `RuntimeError`: "release yok" ile "bilinmiyor" karıştırılmamalı.
+    """
+    p = run([*_gh(repo), "release", "view", tag, "--json", "assets"])
+    if p.returncode != 0:
+        err = gh_error_text(p)
+        if RELEASE_NOT_FOUND in err.lower():
+            return None
+        raise RuntimeError(f"release {tag} sorgusu başarısız: {err}")
+    try:
+        return json.loads(p.stdout).get("assets", [])
+    except ValueError as e:
+        raise RuntimeError(f"release {tag} cevabı çözülemedi: {e}") from e
+
+
 def ensure_release(tag: str, source: str, repo: str | None = None, run: Runner = _run) -> None:
     if run([*_gh(repo), "release", "view", tag]).returncode == 0:
         return
