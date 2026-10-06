@@ -8,7 +8,7 @@ name: Günlük işleme
 #
 # Geçmişi doldurmak için bu iş akışı değil `backfill.yml` kullanılır.
 #
-# Gerekenler (backfill.yml ile aynı): secret ARCHIVE_TOKEN (hedef depoda "Contents: Read and write"),
+# Gerekenler (backfill.yml ile aynı): secret ARCHIVE_TOKEN (fine-grained, YALNIZ hedef depo, YALNIZ "Contents: Read and write"; başka izin yok),
 # variable TARGET_REPO (isteğe bağlı; varsayılan <bu deponun sahibi>/manzlytics).
 on:
   schedule:
@@ -84,6 +84,8 @@ jobs:
       - run: uv sync --all-packages --locked
       - name: Günleri işle ve yükle
         env:
-          GH_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
+          # GH_TOKEN değil: token yalnız process_days.sh içinde archive-publish komutuna verilir;
+          # adsb.lol indirmesi ve işleme (mz-detect daily) token'sız çalışır.
+          ARCHIVE_TOKEN: ${{ secrets.ARCHIVE_TOKEN }}
           DAYS: ${{ matrix.days }}
         run: bash scripts/process_days.sh
